@@ -284,6 +284,13 @@ void NativeWindow::InitFromOptions(const gin_helper::Dictionary& options) {
     Show();
 }
 
+// static
+NativeWindow* NativeWindow::FromWidget(const views::Widget* widget) {
+  DCHECK(widget);
+  return static_cast<NativeWindow*>(
+      widget->GetNativeWindowProperty(kNativeWindowKey.c_str()));
+}
+
 void NativeWindow::SetSize(const gfx::Size& size, bool animate) {
   SetBounds(gfx::Rect(GetPosition(), size), animate);
 }
@@ -823,17 +830,14 @@ bool NativeWindow::IsTranslucent() const {
 
 #if BUILDFLAG(IS_MAC)
   // Windows with vibrancy set are translucent
-  if (!vibrancy().empty()) {
+  if (!vibrancy_.empty())
     return true;
-  }
 #endif
 
 #if BUILDFLAG(IS_WIN)
   // Windows with certain background materials may be translucent
-  const std::string& bg_material = background_material();
-  if (!bg_material.empty() && bg_material != "none") {
+  if (!background_material_.empty() && background_material_ != "none")
     return true;
-  }
 #endif
 
   return false;
