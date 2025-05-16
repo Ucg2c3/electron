@@ -37,6 +37,7 @@
 #include "shell/common/options_switches.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/hit_test.h"
+#include "ui/compositor/compositor.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/native_widget_types.h"
@@ -259,7 +260,7 @@ NativeWindowViews::NativeWindowViews(const gin_helper::Dictionary& options,
 
   const int width = options.ValueOrDefault(options::kWidth, 800);
   const int height = options.ValueOrDefault(options::kHeight, 600);
-  const gfx::Rect bounds{0, 0, width, height};
+  gfx::Rect bounds{0, 0, width, height};
   widget_size_ = bounds.size();
 
   widget()->AddObserver(this);
@@ -400,10 +401,25 @@ NativeWindowViews::NativeWindowViews(const gin_helper::Dictionary& options,
   // Default content view.
   SetContentView(new views::View());
 
+  options.Get(options::kUseContentSize, &use_content_size_);
+
+  // NOTE(@mlaurencin) Spec requirements can be found here:
+  // https://developer.mozilla.org/en-US/docs/Web/API/Window/open#width
+  int kMinSizeReqdBySpec = 100;
+  int inner_width = 0;
+  int inner_height = 0;
+  options.Get(options::kinnerWidth, &inner_width);
+  options.Get(options::kinnerHeight, &inner_height);
+  if (inner_width || inner_height) {
+    use_content_size_ = true;
+    if (inner_width)
+      bounds.set_width(std::max(kMinSizeReqdBySpec, inner_width));
+    if (inner_height)
+      bounds.set_height(std::max(kMinSizeReqdBySpec, inner_height));
+  }
+
   gfx::Size size = bounds.size();
-  if (has_frame() &&
-      options.Get(options::kUseContentSize, &use_content_size_) &&
-      use_content_size_)
+  if (has_frame() && use_content_size_)
     size = ContentBoundsToWindowBounds(gfx::Rect(size)).size();
 
   widget()->CenterWindow(size);
@@ -488,8 +504,7 @@ bool NativeWindowViews::IsFocused() const {
 }
 
 void NativeWindowViews::Show() {
-  if (is_modal() && NativeWindow::parent() &&
-      !widget()->native_widget_private()->IsVisible())
+  if (is_modal() && NativeWindow::parent() && !widget()->IsVisible())
     static_cast<NativeWindowViews*>(parent())->IncrementChildModals();
 
   widget()->native_widget_private()->Show(GetRestoredState(), gfx::Rect());
@@ -1210,6 +1225,7 @@ void NativeWindowViews::SetBackgroundColor(SkColor background_color) {
     DeleteObject((HBRUSH)previous_brush);
   InvalidateRect(GetAcceleratedWidget(), nullptr, 1);
 #endif
+  GetWidget()->GetCompositor()->SetBackgroundColor(background_color);
 }
 
 void NativeWindowViews::SetHasShadow(bool has_shadow) {
@@ -1287,15 +1303,15 @@ void NativeWindowViews::SetIgnoreMouseEvents(bool ignore, bool forward) {
 #endif
 }
 
-void NativeWindowViews::SetContentProtection(bool enable) {
+void NativeWindowViews::SetContentProtection(const bool enable) {
 #if BUILDFLAG(IS_WIN)
-  widget()->native_widget_private()->SetAllowScreenshots(!enable);
+  widget()->SetAllowScreenshots(!enable);
 #endif
 }
 
 bool NativeWindowViews::IsContentProtected() const {
 #if BUILDFLAG(IS_WIN)
-  return !widget()->native_widget_private()->AreScreenshotsAllowed();
+  return !widget()->AreScreenshotsAllowed();
 #else  // Not implemented on Linux
   return false;
 #endif
@@ -1341,7 +1357,8 @@ void NativeWindowViews::SetMenu(ElectronMenuModel* menu_model) {
                                         .supports_global_application_menus;
   if (can_use_global_menus && ShouldUseGlobalMenuBar()) {
     if (!global_menu_bar_)
-      global_menu_bar_ = std::make_unique<GlobalMenuBarX11>(this);
+      global_menu_bar_ =
+          std::make_unique<GlobalMenuBarX11>(GetAcceleratedWidget());
     if (global_menu_bar_->IsServerStarted()) {
       root_view_.RegisterAcceleratorsWithFocusManager(menu_model);
       global_menu_bar_->SetMenu(menu_model);
